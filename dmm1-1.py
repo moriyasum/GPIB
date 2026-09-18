@@ -21,7 +21,6 @@ for i in range(5):   # set number of loop
     print(i, "DC Voltage =", value.strip(), "V")
 
     time.sleep(2)
-    
 
 # Close the instrument
 dmm.close()
