@@ -1,0 +1,73 @@
+--- a/drivers/gpib/ni_usb/ni_usb_gpib.c
++++ b/drivers/gpib/ni_usb/ni_usb_gpib.c
+@@ -479,6 +479,18 @@
+ 			       i - 1, (int)raw_data[i - 1]);
+ 			unexpected = 1;
+ 		}
++
++	/*
++	 * NI GPIB-USB-HS (3923:709b) may omit the register-write status
++	 * block here and proceed directly to the termination block.
++	 */
++	if (raw_data[i] == NIUSB_TERM_ID) {
++		i += ni_usb_parse_termination_block(&raw_data[i]);
++		if (unexpected)
++			ni_usb_dump_raw_block(raw_data, i);
++		return i;
++	}
++
+ 	i += ni_usb_parse_status_block(&raw_data[i], &register_write_status);
+ 	if (register_write_status.id != NIUSB_REG_WRITE_ID) {
+ 		pr_err("unexpected data: register write status id=0x%x, expected 0x%x\n",
+@@ -1015,6 +1027,14 @@
+ 	int i = 0;
+ 	struct ni_usb_status_block status;
+ 
++	/*
++	 * On 3923:709b, sending NIUSB_IBGTS (0x06) after GPIB addressing
++	 * causes the following data write to fail with NIUSB_ADDRESSING_ERROR.
++	 * Keeping the adapter in its current state allows the write to succeed.
++	 */
++	if (ni_priv->product_id == USB_DEVICE_ID_NI_USB_HS)
++		return 0;
++
+ 	if (!ni_priv->bus_interface)
+ 		return -ENODEV;
+ 	usb_dev = interface_to_usbdev(ni_priv->bus_interface);
+@@ -1853,11 +1873,21 @@
+ {
+ 	int retval;
+ 	struct ni_usb_priv *ni_priv = board->private_data;
+-	struct usb_device *usb_dev = interface_to_usbdev(ni_priv->bus_interface);
++	struct usb_device *usb_dev;
+ 	static const int buffer_length = 8;
+ 	u8 *buffer;
+ 	struct ni_usb_status_block status;
+ 	unsigned long flags;
++
++	/*
++	 * NI GPIB-USB-HS (3923:709b) does not tolerate the interrupt-monitor
++	 * control request used by this driver during initialization.
++	 * Normal GPIB transfers work through the bulk endpoints without it.
++	 */
++	if (ni_priv->product_id == USB_DEVICE_ID_NI_USB_HS)
++		return 0;
++
++	usb_dev = interface_to_usbdev(ni_priv->bus_interface);
+ 
+ 	buffer = kmalloc(buffer_length, GFP_KERNEL);
+ 	if (!buffer)
+@@ -1886,6 +1916,13 @@
+ 	struct usb_device *usb_dev;
+ 	int int_pipe;
+ 	int retval;
++
++	/*
++	 * The 3923:709b compatibility path uses synchronous bulk transfers
++	 * only; do not start the interrupt endpoint.
++	 */
++	if (ni_priv->product_id == USB_DEVICE_ID_NI_USB_HS)
++		return 0;
+ 
+ 	if (ni_priv->interrupt_in_endpoint < 0)
+ 		return 0;
